@@ -1,0 +1,292 @@
+---
+title: "Participants Copy: Extracting Insights with R"
+author: "Samuel Chan"
+date: "5/31/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Lebaran: A Twitter's Perspective
+```{r echo=FALSE}
+library("openssl")
+library("httpuv")
+library("twitteR")
+
+cons_key <- 
+cons_sec <- 
+
+acc_tok <- "337982123-e0p3ptGsLDdTu0r3lobargjIxSEbP66BAmsUInyi"
+acc_sec <- 
+
+# expect to see "using direct authentication"
+setup_twitter_oauth(cons_key, cons_sec, acc_tok, acc_sec)
+```
+
+```{r}
+tl <- closestTrendLocations(-6.1751, 106.8650)
+tl
+```
+
+
+```{r}
+trends_jakarta <- getTrends(tl$woeid)
+
+# remove the last column since they're it provides no additional information
+trends_jakarta <- trends_jakarta[,-4]
+head(trends_jakarta)
+```
+
+```{r}
+trends_jakarta[grep("Lebaran", trends_jakarta$query, fixed=T), ]
+```
+
+```{r}
+ramadhan <- searchTwitter("ramadhan", n=1000, since="2018-05-20", until="2018-05-31")
+lebaran <- searchTwitter("lebaran", n=1000, since="2018-05-20", until="2018-05-31")
+```
+
+
+```{r}
+ramadhan[[1]]$text
+```
+
+```{r}
+puasa <- searchTwitter("puasa", n=1000, since="2018-05-20", until="2018-05-31")
+```
+
+
+```{r}
+rama <- twListToDF(ramadhan)
+leba <- twListToDF(lebaran)
+puasa <- twListToDF(puasa)
+str(rama)
+```
+
+```{r}
+leba$tags <- "lebaran"
+rama$tags <- "ramadhan"
+puasa$tags <- "puasa"
+```
+
+
+```{r}
+twt <- rbind(leba, rama, puasa)
+str(twt)
+```
+
+```{r}
+range(twt$created)
+```
+
+
+```{r}
+head(twt$created)
+twt <- twt[order(twt$created, decreasing = F), ]
+head(twt$created)
+```
+
+```{r}
+table(twt$tags)
+```
+
+
+
+```{r}
+head(twt$text)
+```
+
+```{r}
+twt$text <- gsub("@\\w+", "", twt$text)
+twt$text <- gsub(":", "", twt$text, fixed=T)
+twt$text <- gsub("RT", "", twt$text, fixed=T)
+head(twt$text)
+```
+
+## Text Mining and Bahasa-language NLP
+```{r}
+library(tm)
+twtcorp <- VCorpus(VectorSource(twt$text))
+```
+
+```{r}
+twtcorp[[1]]$content
+```
+
+```{r}
+twtclean <- tm_map(twtcorp, content_transformer(tolower))
+twtclean <- tm_map(twtclean, removePunctuation)
+twtclean <- tm_map(twtclean, removeNumbers)
+
+transformer <- content_transformer(function(x, pattern)
+  gsub(pattern, " ", x)
+)
+
+#handle paragraph divider
+twtclean <- tm_map(twtclean, transformer, "\\.")
+#handle repeated word
+twtclean <- tm_map(twtclean, transformer, "-")
+```
+
+```{r}
+stopwords <- suppressWarnings(readLines("stopwords-id.txt"))
+print("removing stop words...")
+system.time({
+  twtclean <- tm_map(twtclean, removeWords, stopwords)  
+})
+```
+
+```{r}
+library(katadasaR)
+words <- c("memanggilnya", "pelajaran", "menuduh", "perlakuan")
+sapply(words, katadasar)
+```
+
+```{r eval=F}
+stemming_bahasa <- content_transformer(function(x){
+  paste(sapply(words(x),katadasar),collapse = " ")
+})
+
+twtclean <- tm_map(twtclean, stemming_bahasa)
+```
+
+```{r}
+twtclean <- tm_map(twtclean, stripWhitespace)
+```
+
+```{r}
+twtclean[[1]]$content
+twtclean[[2]]$content
+```
+
+```{r}
+twtclean <- tm_map(twtclean, transformer, ":")
+twtclean[[1]]$content
+twtclean[[2]]$content
+```
+
+## Insight discovery: Visualizing tweets
+```{r}
+set.seed(100)
+wordcloud(twtclean, min.freq = 10, max.words=250, random.order = F, colors=brewer.pal(8, "Set2"))
+```
+
+
+```{r}
+dtm <- TermDocumentMatrix(twtclean)
+mat <- as.matrix(dtm)
+
+# sort by frequency and print the first 20
+v <- sort(rowSums(mat), decreasing=TRUE)
+d <- data.frame(word = names(v), freq=v)
+head(d, 20)
+```
+
+```{r}
+barplot(v[1:20], col=brewer.pal(4, "Greens"), las=2)
+```
+
+```{r}
+
+```
+
+
+```{r}
+findFreqTerms(dtm, lowfreq = 50)
+```
+
+
+```{r fig.width=5}
+library(wordcloud)
+set.seed(100)
+wordcloud(words = d$word, freq=d$freq, min.freq=10, random.order=F, colors=brewer.pal(8, "Dark2"), rot.per = 0.35)
+```
+
+```{r}
+findAssocs(dtm, "lebaran", 0.4)
+```
+
+```{r}
+findAssocs(dtm, "semangat", 0.75)
+```
+
+
+```{r}
+smg <- twt[grep("semangat", twt$text),1]
+unique(smg)
+```
+
+## Insight discovery: Clash of the Giants
+```{r}
+gojek <- userTimeline("gojekindonesia", n=2000)
+gojek <- twListToDF(gojek)
+range(gojek$created)
+```
+
+
+If we want to (optional: there is already `screenName`)
+```{r}
+gojek$brand <- "gojek"
+```
+
+
+```{r}
+brands <- read.csv("practice.csv")
+```
+
+
+```{r}
+brands$created <- as.POSIXct(brands$created)
+brands$dayofweek <- weekdays(brands$created)
+brands$date <- as.Date(brands$created)
+```
+
+```{r}
+range(brands$date)
+table(brands$dayofweek)
+```
+
+```{r}
+brandsrec <- brands[brands$date >= as.Date("2018-05-15") & brands$date <= as.Date("2018-06-01"), ]
+brandsrec <- brandsrec[order(brandsrec$created, decreasing = F), ]
+brandsrec$hour <- lubridate::hour(brandsrec$created)
+```
+
+
+```{r}
+str(brandsrec)
+```
+
+```{r}
+brandsrec <- brandsrec[,c(2, 5, 11, 12, 14, 18:20)]
+str(brandsrec)
+```
+
+```{r}
+hist(brandsrec$hour, breaks=24, col=brewer.pal(5, "Dark2"), freq = F)
+lines(density(brandsrec$hour), col="black", lwd=2)
+```
+
+
+
+```{r}
+histogram(~hour|screenName, data=brandsrec, 
+          type="density", scales=list(x=list(at=seq(0,24,by=4))),
+          breaks=20, col=brewer.pal(5, "Dark2"))
+```
+
+```{r}
+brandstab <- data.frame(table(brandsrec$dayofweek, brandsrec$screenName))
+head(brandstab)
+```
+
+```{r}
+barchart(Var1~Freq|Var2, brandstab, col=brewer.pal(5, "Dark2"),
+         par.settings = list(strip.background=list(col="lightgreen")))
+```
+
+
+
+
